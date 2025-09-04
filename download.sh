@@ -3,6 +3,7 @@ set -euo pipefail
 
 git clone https://github.com/ML-GSAI/LLaDA
 git clone https://github.com/EleutherAI/lm-evaluation-harness
+pip install lm_eval
 
 ROOT="/opt/tiger/sft_entity"
 HF_TOKEN=""
