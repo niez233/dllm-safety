@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="/opt/tiger/sft_entity"
-HF_TOKEN="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"
+HF_TOKEN=""
 USE_SYMLINKS="True"   # Change to "False" to copy real files instead of using symlinks (uses more disk)
 
 MODELS=(
