@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+git clone https://github.com/ML-GSAI/LLaDA
+git clone https://github.com/EleutherAI/lm-evaluation-harness
+
 ROOT="/opt/tiger/sft_entity"
 HF_TOKEN=""
 USE_SYMLINKS="True"   # Change to "False" to copy real files instead of using symlinks (uses more disk)
