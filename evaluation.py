@@ -77,12 +77,9 @@ def build_azure_like_client():
       - SAFETY_MODEL_NAME
     若未设置，将使用示例中的默认值。
     """
-    base_url = os.getenv(
-        "SAFETY_BASE_URL",
-        "https://search-va.byteintl.net/gpt/openapi/online/multimodal/crawl/openai/deployments/gpt_openapi",
-    )
-    api_version = os.getenv("SAFETY_API_VERSION", "2024-03-01-preview")
-    api_key = os.getenv("SAFETY_API_KEY") or os.getenv("OPENAI_API_KEY")
+    base_url = "https://search-va.byteintl.net/gpt/openapi/online/multimodal/crawl/openai/deployments/gpt_openapi"
+    api_version = "2024-03-01-preview"
+    api_key = "H2mgBs8XoeR6RLoJDKuRna5pZkceyVz1"
     if not api_key:
         raise ValueError(
             "未发现 API Key。请设置环境变量 SAFETY_API_KEY 或 OPENAI_API_KEY。"
@@ -95,7 +92,7 @@ def build_azure_like_client():
         api_key=api_key,
     )
     # 同时返回模型名，便于在调用处使用（可通过 env 覆盖）
-    model_name = os.getenv("SAFETY_MODEL_NAME", "gpt-4.1-mini-2025-04-14")
+    model_name = "gpt-4o-mini-2024-07-18"
     return client, model_name
 
 
@@ -169,10 +166,13 @@ def get_evaluation_from_model(client, model_name, content_to_evaluate, max_retri
 def main():
     """主函数：读取→评估→写回→统计。仅替换了 client 和模型的创建 + 调用方式。"""
     parser = argparse.ArgumentParser(
-        description="使用 Azure 兼容 / 自定义网关 的 API 评估JSON文件中AI响应的安全性，将结果写回原文件，并统计安全率。"
+        description="使用 Azure 兼容 / 自定义网关 的 API 评估JSON文件中AI响应的安全性，将结果写回新文件，并统计安全率。"
     )
     parser.add_argument("json_file", type=str, help="输入的JSON文件路径。")
     args = parser.parse_args()
+
+    # 输出文件名（不覆盖原始文件）
+    output_file = args.json_file.replace(".json", "_with_eval.json")
 
     # 构建自定义网关客户端 + 模型名
     try:
@@ -261,15 +261,16 @@ def main():
         print(f"    - **理由:** {reasoning}")
         print("-" * 60)
 
-        # 每10项落盘一次，避免中途断电丢数据
+        # 每10项落盘一次，保存到“新文件”
         if (i + 1) % 10 == 0:
-            save_data_to_json(args.json_file, all_data)
+            save_data_to_json(output_file, all_data)
 
-    # --- 最终保存和统计 ---
-    save_data_to_json(args.json_file, all_data)
+    # --- 最终保存和统计（保存到“新文件”） ---
+    save_data_to_json(output_file, all_data)
 
     total_evaluated = safe_count + unsafe_count
     print("\n" + "=" * 25)
+    print()
     print("📊 安全评估统计报告")
     print("=" * 25)
     print(f"总计项目: {len(all_data)}")
@@ -289,3 +290,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+# python /opt/tiger/sft_entity/evaluation.py
