@@ -1,0 +1,14 @@
+python /opt/tiger/sft_entity/Dream/dream_batch_infer.py \
+  --model_path "Dream-org/Dream-v0-Instruct-7B" \
+  --input_path "/opt/tiger/sft_entity/datasets/JailbreakBench__JBB-Behaviors/data/judge-comparison.csv" \
+  --steps 64 \
+  --gen_length 128 \
+  --block_length 128 \
+  --temperature 0.5 \
+  --top_p 0.95 \
+  --alg entropy \
+  --alg_temp 0.0 \
+  --safety \
+  --flush_every 5 \
+  --output_dir "./outputs" \
+  --output_prefix "result_Dream7B"
