@@ -125,6 +125,7 @@ def generate(
     pad_anchors: Optional[Iterable[str]] = None, # e.g. ["Step 1:", "Step 2:", "Step 3:"]
     pad_positions: Optional[Iterable[int]] = None,
     pad_in_uncond: bool = True,
+    protected_index: Optional[torch.Tensor] = None,  # <<<<< 新增：受保护位置（如 system/self-reminder）
 ):
     """
     与 LLaDA 增强脚本保持一致的接口与策略，但针对 MMaDA 的典型用法：
@@ -140,6 +141,7 @@ def generate(
 
     # 标记“非掩码”的初始提示位置（用于 CFG）
     prompt_index = (x != mask_id)
+
     # === LLaDA-identical PAD ===
     uncond_prompt_index = prompt_index  # 默认：无条件分支与有条件一致
     if attack_method.lower() == "pad":
@@ -180,6 +182,24 @@ def generate(
         # 4) 无条件分支是否也“看到”锚点（与 LLaDA 一致）
         if not pad_in_uncond:
             uncond_prompt_index = (x != mask_id)
+
+    # >>> NEW: 统一对齐 protected_index 到 x 的形状（对所有 attack_method 生效）
+    if protected_index is not None:
+        pi = protected_index.to(device)
+        if pi.dtype != torch.bool:
+            pi = (pi != 0)
+        if pi.dim() == 1:
+            pi = pi.unsqueeze(0)
+        if pi.size(0) == 1 and x.size(0) > 1:
+            pi = pi.expand(x.size(0), -1).clone()
+        # 序列维对齐：右侧补 False；过长则截断
+        if pi.size(1) < x.size(1):
+            pad_len = x.size(1) - pi.size(1)
+            pad = torch.zeros((pi.size(0), pad_len), dtype=torch.bool, device=device)
+            pi = torch.cat([pi, pad], dim=1)
+        elif pi.size(1) > x.size(1):
+            pi = pi[:, :x.size(1)]
+        protected_index = pi  # [B, L]，尾部新增 token 默认不受保护
 
     # 仅一个“块”
     block_start, block_end = 0, x.shape[1]
@@ -293,20 +313,25 @@ def generate(
         else:
             raise NotImplementedError(remasking)
 
-        # 只在“当前仍是 mask 的位置”里选 top-k
+        # 只在“当前仍是 mask 的位置”里选 top-k，且排除受保护位置
         x0 = torch.where(mask_index, x0, x)
-        confidence = torch.where(mask_index, x0_p, -np.inf)
+        confidence = torch.where(mask_index, x0_p, torch.tensor(-float("inf"), device=x0.device))
+        if protected_index is not None:
+            confidence = confidence.masked_fill(protected_index, -float("inf"))
 
         transfer_index = torch.zeros_like(x, dtype=torch.bool, device=x.device)
         for b in range(confidence.shape[0]):
-            k = int(num_transfer_tokens[b].item())
-            if k <= 0:
+            k_plan = int(num_transfer_tokens[b].item())
+            if k_plan <= 0:
                 continue
-            # 不能超过该 batch 中仍为 mask 的数量
-            k = min(k, int(mask_index[b].sum().item()))
-            if k > 0:
-                _, select_index = torch.topk(confidence[b], k=k)
-                transfer_index[b, select_index] = True
+            eligible = (confidence[b] > -float("inf"))
+            eligible_count = int(eligible.sum().item())
+            if eligible_count == 0:
+                continue
+            k = min(k_plan, eligible_count)
+            conf_b = torch.where(eligible, confidence[b], torch.tensor(-float("inf"), device=confidence.device))
+            _, select_index = torch.topk(conf_b, k=k)
+            transfer_index[b, select_index] = True
         x[transfer_index] = x0[transfer_index]
 
         iter_id += 1
@@ -336,13 +361,20 @@ def generate(
         if debug_print:
             print(f"[MMaDA] --> Refinement Phase (steps={refinement_steps}, remask_ratio={remask_ratio})", flush=True)
 
-        original_block_tokens = x[:, block_start:block_end].clone()
-        num_to_remask = int((block_end - block_start) * float(remask_ratio))
-        if num_to_remask > 0:
-            perm = torch.randperm(block_end - block_start, device=x.device)
-            block_indices_to_remask = perm[:num_to_remask]
-            global_indices_to_remask = block_indices_to_remask + block_start
-            original_token_ids_at_remasked_pos = original_block_tokens[:, block_indices_to_remask]
+        # 仅允许在 [block_start, block_end) 且 非保护 的位置重掩码（位置在各 batch 共享）
+        eligible_positions = torch.zeros(x.shape[1], dtype=torch.bool, device=x.device)
+        eligible_positions[block_start:block_end] = True
+        if protected_index is not None:
+            prot_any = protected_index.any(dim=0)   # 任一 batch 保护都排除
+            eligible_positions &= ~prot_any
+
+        cand = torch.nonzero(eligible_positions, as_tuple=False).squeeze(1)
+        num_to_remask = int(cand.numel() * float(remask_ratio))
+
+        if num_to_remask > 0 and cand.numel() > 0:
+            perm = cand[torch.randperm(cand.numel(), device=x.device)[:num_to_remask]]
+            global_indices_to_remask = perm
+            original_token_ids_at_remasked_pos = x[:, global_indices_to_remask].clone()
             x[:, global_indices_to_remask] = mask_id
 
             refinement_mask_index = (x[:, block_start:block_end] == mask_id)
@@ -386,18 +418,25 @@ def generate(
                 else:
                     x0_p = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)
 
-                # 仅在本“块”（全序列）范围内
-                conf = x0_p
+                # 仅在本“块”范围内，排除受保护位置
                 x0 = torch.where(mask_index, x0, x)
-                confidence = torch.where(mask_index, conf, -np.inf)
+                confidence = torch.where(mask_index, x0_p, torch.tensor(-float("inf"), device=x0.device))
+                if protected_index is not None:
+                    confidence = confidence.masked_fill(protected_index, -float("inf"))
 
                 refine_transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=x0.device)
-                for j in range(confidence.shape[0]):
-                    k = int(min(num_refine_transfer[j, r_step].item(),
-                                torch.sum(confidence[j] > -np.inf).item()))
-                    if k > 0:
-                        _, select_index = torch.topk(confidence[j], k=k)
-                        refine_transfer_index[j, select_index] = True
+                for b in range(confidence.shape[0]):
+                    k_plan = int(num_refine_transfer[b, r_step].item())
+                    if k_plan <= 0:
+                        continue
+                    eligible = (confidence[b] > -float("inf"))
+                    eligible_count = int(eligible.sum().item())
+                    if eligible_count == 0:
+                        continue
+                    k = min(k_plan, eligible_count)
+                    conf_b = torch.where(eligible, confidence[b], torch.tensor(-float("inf"), device=confidence.device))
+                    _, select_index = torch.topk(conf_b, k=k)
+                    refine_transfer_index[b, select_index] = True
 
                 x[refine_transfer_index] = x0[refine_transfer_index]
 
@@ -435,6 +474,7 @@ def generate_mmada(
     pad_anchors: Optional[Iterable[str]] = None,
     pad_positions: Optional[Iterable[int]] = None,
     pad_in_uncond: bool = True,
+    protected_index: Optional[torch.Tensor] = None,   # <<<<< 新增：透传
 ):
     assert tokenizer is not None, "generate_mmada 需要 tokenizer（用于 cues 与可选注入/自检）。"
     return generate(
@@ -465,4 +505,5 @@ def generate_mmada(
         pad_anchors=pad_anchors,
         pad_positions=pad_positions,
         pad_in_uncond=pad_in_uncond,
+        protected_index=protected_index,   # <<<<< 新增：透传
     )

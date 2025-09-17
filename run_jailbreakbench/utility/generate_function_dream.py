@@ -339,6 +339,7 @@ def generate_dream_llada_hidden(
     protect_anchors: bool = True,
     correction_scope: str = "block_all",     # 与非 PAD 共用
     initial_mask_in_prompt: Optional[torch.Tensor] = None,  # [B, L_prompt]
+    exclude_mask_positions: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, list]:
     """
     Dream 版 LLaDA-hidden：
@@ -498,7 +499,22 @@ def generate_dream_llada_hidden(
 
     # ---------- 统一的“逐步再填”自纠正 ----------
     if unsafe and correct_only_first_block and refinement_steps > 0 and remask_ratio > 0.0:
+                # 组合保护掩码：PAD 锚点（可选） ∪ 外部保护（system 前缀）
         excl = anchor_pos_mask if protect_anchors else None
+        if exclude_mask_positions is not None:
+            # 对齐到最终序列长度
+            ex = exclude_mask_positions.to(seq.device)
+            if ex.dim() == 1:
+                ex = ex.unsqueeze(0)
+            if ex.size(0) == 1 and seq.size(0) > 1:
+                ex = ex.expand(seq.size(0), -1).clone()
+            if ex.size(1) < seq.size(1):
+                pad = torch.zeros(ex.size(0), seq.size(1)-ex.size(1), dtype=torch.bool, device=seq.device)
+                ex = torch.cat([ex, pad], dim=1)
+            elif ex.size(1) > seq.size(1):
+                ex = ex[:, :seq.size(1)]
+            excl = ex if excl is None else (excl | ex)
+
         seq = apply_self_correction(
             model=model,
             tokenizer=tokenizer,

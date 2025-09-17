@@ -438,6 +438,7 @@ def generate_response(
     baseline_hidden: Optional[torch.Tensor],   # 外层预先计算的 vanilla 尾块均值向量（van_mu）
     attack_probe_hidden: Optional[torch.Tensor],  # 外层预先计算的 refined 尾块均值（ref_mu，可为 None）
     initial_mask_from_prompt: torch.Tensor,    # [B,L_prompt] 初始掩码位（供SC使用）
+    system_prompt: Optional[str] = None,   
 ) -> str:
     """
     解码路径：
@@ -448,7 +449,18 @@ def generate_response(
     # 编码
     input_ids, attention_mask = tokenized(model.device, tokenizer, prompt)
     vanilla_ids, _ = tokenized(model.device, tokenizer, vanilla_prompt)
-
+    protected_index = None
+    if system_prompt:
+        try:
+            sys_only_ids = tokenizer.apply_chat_template(
+                [{"role": "system", "content": system_prompt}],
+                tokenize=True, add_generation_prompt=False, return_tensors="pt"
+            ).to(model.device)
+            sys_len = min(sys_only_ids.shape[1], input_ids.shape[1])
+            protected_index = torch.zeros_like(input_ids, dtype=torch.bool)
+            protected_index[:, :sys_len] = True
+        except Exception:
+            protected_index = None
     # 公共前缀长度（token 逐位比较）
     matching_count = min(
         sum(a.item() == b.item() for a, b in zip(vanilla_ids[0], input_ids[0])),
@@ -496,6 +508,7 @@ def generate_response(
             protect_anchors=bool(args.protect_anchors),
             correction_scope=args.correction_scope,
             initial_mask_in_prompt=initial_mask_from_prompt,
+            exclude_mask_positions=protected_index,
         )
 
     # ======= 原生 generate（无 AR） =======
@@ -550,6 +563,7 @@ def generate_response(
                 remask_ratio=args.remask_ratio,
                 suppression_value=args.suppression_value,
                 correction_scope=args.correction_scope,
+                exclude_mask_positions=protected_index,
                 debug_print=args.debug_print,
             )
 
@@ -703,6 +717,7 @@ def main():
                 baseline_hidden=baseline_mu,      # van_mu（可能为 None）
                 attack_probe_hidden=ref_mu,       # ref_mu（可能为 None）
                 initial_mask_from_prompt=initial_mask_from_prompt,
+                system_prompt=system_for_both,  
             )
             logging.info(f"{COLOR_BLUE}[{idx}] Response: {response}{COLOR_RESET}\n")
 

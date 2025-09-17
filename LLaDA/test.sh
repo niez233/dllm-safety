@@ -2,7 +2,7 @@ python generate_new.py \
     --model_name "LLaDA-8B-Instruct" \
     --custom_cache_dir "/opt/tiger/sft_entity/models/GSAI-ML__LLaDA-8B-Instruct" \
     --device "cuda:1" \
-    --input_path "/opt/tiger/sft_entity/dllm-safety/gcg.csv" \
+    --input_path "/opt/tiger/sft_entity/datasets/JailbreakBench__JBB-Behaviors/data/judge-comparison.csv" \
     --safety
 
 python generate_new.py \
@@ -37,18 +37,10 @@ python generate_new.py \
     --input_path "/opt/tiger/sft_entity/dllm-safety/gcg.csv"
 
 # --remasking adaptive_step --alpha0 0.3
-python generate_detection.py \
-  --model_name "LLaDA-8B-Instruct" \
-  --custom_cache_dir "/opt/tiger/sft_entity/models/GSAI-ML__LLaDA-8B-Instruct" \
-  --input_path /opt/tiger/sft_entity/dllm-safety/dija_advbench.json \
-  --input_format json \
-  --json_field "refined prompt" \
-  --fill_all_masks \
-  --steps 64 \
-  --gen_length 128 \
-  --block_length 128 \
-  --temperature 0.5 \
-  --device cuda \
-  --sp_mode hidden \
-  --debug_print
+python /opt/tiger/sft_entity/dllm-safety/LLaDA/generate_alpha.py \
+    --model_name "LLaDA-8B-Instruct" \
+    --custom_cache_dir "/opt/tiger/sft_entity/models/GSAI-ML__LLaDA-8B-Instruct" \
+    --device "cuda:4" \
+    --remasking adaptive_step \
+    --input_path "/opt/tiger/sft_entity/datasets/allenai__wildjailbreak/eval/eval_harmful.tsv"
 #   --remasking adaptive_step --alpha0 0.4

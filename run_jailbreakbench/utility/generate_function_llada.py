@@ -126,6 +126,7 @@ def generate(
     pad_anchors: Optional[Iterable[str]] = None, # 结构锚点短语
     pad_positions: Optional[Iterable[int]] = None, # 相对后缀的起始偏移（与 anchors 对齐）
     pad_in_uncond: bool = True,    
+    protected_index: Optional[torch.Tensor] = None,
 ):
     device = next(model.parameters()).device
 
@@ -154,6 +155,28 @@ def generate(
             am = torch.cat([am, pad], dim=1)
         elif am.shape[1] > x.shape[1]:
             am = am[:, :x.shape[1]]
+        # === 对齐 protected_index 到 x 的长度与批次 ===
+    if protected_index is not None:
+        pi = protected_index.to(device)
+        # 统一成 bool 掩码
+        if pi.dtype != torch.bool:
+            pi = pi != 0
+        # 对齐 batch 维：若提供的是 [1, L] 而 x 是 [B, L]，则扩展到 B
+        if pi.shape[0] != x.shape[0]:
+            if pi.shape[0] == 1:
+                pi = pi.expand(x.shape[0], -1).contiguous()
+            else:
+                # 非 1 批无法自动广播，回退只取第一行
+                pi = pi[:1].expand(x.shape[0], -1).contiguous()
+        # 对齐序列长度
+        if pi.shape[1] < x.shape[1]:
+            pad_len = x.shape[1] - pi.shape[1]
+            pad = torch.zeros(pi.size(0), pad_len, dtype=torch.bool, device=device)
+            pi = torch.cat([pi, pad], dim=1)
+        elif pi.shape[1] > x.shape[1]:
+            pi = pi[:, :x.shape[1]]
+        protected_index = pi
+
     # >>> 新增：PAD 预注入（在去噪开始前）
     uncond_prompt_index = prompt_index  # 默认：无条件分支用最初的 prompt_index
     if attack_method.lower() == "pad":
@@ -298,6 +321,8 @@ def generate(
             conf = x0_p.clone()
             conf[:, :block_start] = -np.inf
             conf[:, block_end:]   = -np.inf
+            if protected_index is not None:
+                conf = conf.masked_fill(protected_index, -float("inf"))
 
             x0 = torch.where(mask_index, x0, x)
             confidence = torch.where(mask_index, conf, -np.inf)
@@ -335,13 +360,27 @@ def generate(
             if debug_print:
                 print(f"--> Refinement Phase (steps={refinement_steps}, remask_ratio={remask_ratio})", flush=True)
 
-            original_block_tokens = x[:, block_start:block_end].clone()
-            num_to_remask = int((block_end - block_start) * float(remask_ratio))
-            if num_to_remask > 0:
-                perm = torch.randperm(block_end - block_start, device=x.device)
-                block_indices_to_remask = perm[:num_to_remask]
-                global_indices_to_remask = block_indices_to_remask + block_start
-                original_token_ids_at_remasked_pos = original_block_tokens[:, block_indices_to_remask]
+            # original_block_tokens = x[:, block_start:block_end].clone()
+            # num_to_remask = int((block_end - block_start) * float(remask_ratio))
+            # if num_to_remask > 0:
+            #     perm = torch.randperm(block_end - block_start, device=x.device)
+            #     block_indices_to_remask = perm[:num_to_remask]
+            #     global_indices_to_remask = block_indices_to_remask + block_start
+            #     original_token_ids_at_remasked_pos = original_block_tokens[:, block_indices_to_remask]
+            #     x[:, global_indices_to_remask] = mask_id
+
+            eligible = torch.zeros(x.shape[1], dtype=torch.bool, device=x.device)
+            eligible[block_start:block_end] = True
+            if protected_index is not None:
+                eligible &= ~protected_index[0]  # 批大小为1时可用 [0]；多 batch 可按需扩展
+
+            cand = torch.nonzero(eligible, as_tuple=False).squeeze(1)
+            num_to_remask = int(cand.numel() * float(remask_ratio))
+
+            if num_to_remask > 0 and cand.numel() > 0:
+                perm = cand[torch.randperm(cand.numel(), device=x.device)[:num_to_remask]]
+                global_indices_to_remask = perm
+                original_token_ids_at_remasked_pos = x[:, global_indices_to_remask].clone()
                 x[:, global_indices_to_remask] = mask_id
 
                 refinement_mask_index = (x[:, block_start:block_end] == mask_id)
@@ -382,6 +421,8 @@ def generate(
                     conf = x0_p.clone()
                     conf[:, :block_start] = -np.inf
                     conf[:, block_end:]   = -np.inf
+                    if protected_index is not None:
+                        conf = conf.masked_fill(protected_index, -float("inf"))
 
                     x0 = torch.where(mask_index, x0, x)
                     confidence = torch.where(mask_index, conf, -np.inf)
@@ -430,6 +471,7 @@ def generate_llada(
     pad_anchors: Optional[Iterable[str]] = None,
     pad_positions: Optional[Iterable[int]] = None,
     pad_in_uncond: bool = True,
+    protected_index: Optional[torch.Tensor] = None,
 ):
     assert tokenizer is not None, "generate_llada 需要 tokenizer（用于安全自检 cues 与可选注入）。"
     return generate(
@@ -460,4 +502,5 @@ def generate_llada(
         pad_anchors=pad_anchors,
         pad_positions=pad_positions,
         pad_in_uncond=pad_in_uncond,
+        protected_index=protected_index,
     )

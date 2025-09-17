@@ -258,10 +258,20 @@ def cosine_distance_vec(a: torch.Tensor, b: torch.Tensor) -> float:
 
 
 # ---------- 生成 ----------
-def generate_response(vanilla_prompt: str, prompt: str, tokenizer, model, args, baseline_hidden=None) -> str:
+def generate_response(vanilla_prompt: str, prompt: str, tokenizer, model, args, baseline_hidden=None, system_prompt: str | None = None) -> str:
     input_ids, attention_mask = get_tokenized_input(prompt, tokenizer, model.device)
     vanilla_ids, _ = get_tokenized_input(vanilla_prompt, tokenizer, model.device)
-
+    # === 计算 system/self-reminder 的 token 长度，并构造保护掩码 ===
+    protected_index = torch.zeros_like(input_ids, dtype=torch.bool, device=model.device)
+    if system_prompt:
+        # 只包含 system 的同模板 token 化（不加生成提示）
+        sys_only_ids = tokenizer.apply_chat_template(
+            [{"role": "system", "content": system_prompt}],
+            tokenize=True, add_generation_prompt=False, return_tensors="pt"
+        ).to(model.device)
+        sys_len = sys_only_ids.shape[1]
+        sys_len = min(sys_len, input_ids.shape[1])  # 防御越界
+        protected_index[:, :sys_len] = True
     # 对齐输出：跳过与 vanilla 前缀相同的 token
     matching_count = min(
         sum(a.item() == b.item() for a, b in zip(vanilla_ids[0], input_ids[0])),
@@ -298,6 +308,7 @@ def generate_response(vanilla_prompt: str, prompt: str, tokenizer, model, args, 
         pad_anchors=["Step 1:", "Step 2:", "Step 3:"],
         pad_positions=None,
         pad_in_uncond=True, ######
+        protected_index=protected_index,
     )
 
     response = tokenizer.batch_decode(output_ids[:, matching_count:], skip_special_tokens=True)[0]
@@ -453,7 +464,7 @@ def main():
                 logging.info(("TAIL_REF=" + det_refined_prompt[:600]).replace("\n", "\\n"))
 
             # 生成
-            response = generate_response(vanilla_prompt, prompt, tokenizer, model, args, baseline_hidden=baseline_hidden)
+            response = generate_response(vanilla_prompt, prompt, tokenizer, model, args, baseline_hidden=baseline_hidden, system_prompt=system_for_both)
             logging.info(f"{COLOR_BLUE}Response: {response}{COLOR_RESET}\n")
 
             # 记录
