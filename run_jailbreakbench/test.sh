@@ -40,9 +40,9 @@ python models/jailbreakbench_llada.py \
 
 python models/jailbreakbench_llada.py \
   --model_path "/opt/tiger/sft_entity/DIJA/hf_models/LLaDA-8B-Instruct" \
-  --attack_method DIJA \
+  --attack_method PAD \
   --attack_prompt "/opt/tiger/sft_entity/dllm-safety/dija_advbench.json" \
-  --output_json /opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_DIJA_adaptive_step_hidden_8b.json \
+  --output_json /opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_PAD_adaptive_step_hidden_8b.json \
   --remasking adaptive_step \
   --sp_mode hidden --sp_threshold 0.1 \
   --refinement_steps 8 --remask_ratio 0.9 --debug_print --fill_all_masks
@@ -71,7 +71,7 @@ python models/jailbreakbench_llada.py \
   --attack_prompt "/opt/tiger/sft_entity/dllm-safety/dija_advbench.json" \
   --output_json /opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_PAD_adaptive_step_hidden_1.5.json \
   --remasking adaptive_step \
-  --sp_mode hidden --sp_threshold 0.2 \
+  --sp_mode hidden --sp_threshold 0.1 \
   --refinement_steps 8 --remask_ratio 0.9 --debug_print --fill_all_masks
 
 python models/jailbreakbench_llada.py \
@@ -163,7 +163,7 @@ python models/jailbreakbench_mmada.py \
   --output_json /opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_DIJA_reminder_adaptive_step_hidden_mmada.json \
   --remasking adaptive_step \
   --defense_method self-reminder \
-  --sp_mode hidden --sp_threshold 0.2 \
+  --sp_mode hidden --sp_threshold 0.1 \
   --refinement_steps 8 --remask_ratio 0.9 --debug_print --fill_all_masks
 
 python models/jailbreakbench_dream.py \
@@ -188,7 +188,7 @@ python models/jailbreakbench_dream.py \
   --mask_counts 36 \
   --temperature 0.5 \
   --remasking adaptive_step \
-  --sp_mode hidden --sp_threshold 0.2 \
+  --sp_mode hidden --sp_threshold 0.1 \
   --refinement_steps 8 --remask_ratio 0.9 \
   --defense_method self-reminder \
   --pad_anchors "Step 1:" "Step 2:" "Step 3:" \
@@ -237,14 +237,14 @@ python models/jailbreakbench_dream.py \
 python models/jailbreakbench_dream.py \
   --model_path "/opt/tiger/sft_entity/DIJA/hf_models/Dream-v0-Instruct-7B" \
   --attack_prompt "/opt/tiger/sft_entity/dllm-safety/dija_advbench.json" \
-  --output_json "/opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_DIJA_adaptive_step_hidden_dream.json" \
+  --output_json "/opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_DIJA_reminder_adaptive_step_hidden_dream.json" \
   --attack_method DIJA \
   --steps 64 \
   --gen_length 128 \
   --mask_counts 36 \
   --temperature 0.5 \
   --remasking adaptive_step \
-#  --defense_method self-reminder \
+  --defense_method self-reminder \
   --sp_mode hidden --sp_threshold 0.1 \
   --refinement_steps 8 --remask_ratio 0.9 \
   --debug_print

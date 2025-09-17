@@ -42,5 +42,6 @@ python /opt/tiger/sft_entity/dllm-safety/LLaDA/generate_alpha.py \
     --custom_cache_dir "/opt/tiger/sft_entity/models/GSAI-ML__LLaDA-8B-Instruct" \
     --device "cuda:4" \
     --remasking adaptive_step \
+    --safety \
     --input_path "/opt/tiger/sft_entity/datasets/allenai__wildjailbreak/eval/eval_harmful.tsv"
 #   --remasking adaptive_step --alpha0 0.4
