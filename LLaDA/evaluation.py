@@ -295,4 +295,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# python /opt/tiger/sft_entity/LLaDA/evaluation.py /opt/tiger/sft_entity/LLaDA/result_MMaDA-8B_safety_autodan.json
+# python /opt/tiger/sft_entity/dllm-safety/LLaDA/evaluation.py /opt/tiger/sft_entity/LLaDA/result_MMaDA-8B_safety_autodan.json
