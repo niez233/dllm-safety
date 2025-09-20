@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # Dream 外层生成器（统一版）：
 # - 自适应 Remask 控制（用于逐步落子）
-# - Hidden Self-Detection（LLaDA 风格：step-0 block hidden vs baseline）
-# - Self-Correction（LLaDA 式：随机重掩 + 原 token 抑制 + 逐步再填）
+# - Hidden Self-Detection(step-0 block hidden vs baseline）
+# - Self-Correction（：随机重掩 + 原 token 抑制 + 逐步再填）
 from __future__ import annotations
 from typing import Optional, Iterable, Tuple, Dict
 import math
@@ -191,7 +191,7 @@ class AdaptiveRemaskController:
             self.prev_x = x.clone()
             return x
 
-# ------------------ LLaDA 式自纠正（统一给 PAD / 非 PAD 用） ------------------
+# ------------------ 自纠正（统一给 PAD / 非 PAD 用） ------------------
 
 @torch.no_grad()
 def apply_self_correction(
@@ -210,7 +210,7 @@ def apply_self_correction(
     debug_print: bool = False,
 ) -> torch.Tensor:
     """
-    LLaDA式自纠正：随机重掩 + 原token抑制 + 逐步再填（per-step top-k）。
+    自纠正：随机重掩 + 原token抑制 + 逐步再填（per-step top-k）。
     """
     device = seq_ids.device
     x = seq_ids.clone()
@@ -301,17 +301,17 @@ def apply_self_correction(
 
             if debug_print and (r == 0 or r + 1 == refinement_steps):
                 changed = (x[b, pick] != orig_tokens).float().mean().item()
-                logging.info(f"[Dream-AR] refine step {r+1}/{refinement_steps} | changed@pick={changed:.2%}")
+                logging.info(f"  refine step {r+1}/{refinement_steps} | changed@pick={changed:.2%}")
 
             if not (x == mask_id).any():
                 break
 
     return x
 
-# ------------------ Dream 版 LLaDA-hidden 生成器（统一 PAD/非 PAD 自纠正） ------------------
+# ------------------ Dream 版 hidden 生成器（统一 PAD/非 PAD 自纠正） ------------------
 
 @torch.no_grad()
-def generate_dream_llada_hidden(
+def generate_dream_hidden(
     *,
     model,
     tokenizer,
@@ -342,7 +342,7 @@ def generate_dream_llada_hidden(
     exclude_mask_positions: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, list]:
     """
-    Dream 版 LLaDA-hidden：
+    Dream 版 hidden：
       - step=0 block hidden vs baseline 做余弦距离（1-cos）判定；
       - 触发后调用 apply_self_correction（随机重掩 + 原 token 抑制 + 逐步再填），
         与非 PAD 路径保持一致；支持 correction_scope 与锚点保护。
@@ -491,7 +491,7 @@ def generate_dream_llada_hidden(
 
     unsafe = have_baseline and (sp_hidden >= float(sp_threshold))
     logger.info(
-        f"[Block 1/1|LLaDA-H] have_baseline={have_baseline}, "
+        f"[Block 1/1|-H] have_baseline={have_baseline}, "
         f"have_hook_blk={hidden_holder['h_step0_block_mean'] is not None}, "
         f"have_probe={attack_probe_hidden is not None}, "
         f"SP(hidden)={sp_hidden:.3f}, thr={float(sp_threshold):.3f}, unsafe={unsafe}"

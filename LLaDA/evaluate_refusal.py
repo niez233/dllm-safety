@@ -265,4 +265,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# python /opt/tiger/sft_entity/LLaDA/evaluate_refusal.py /opt/tiger/sft_entity/LLaDA/result_LLaDA-8B-Instruct_safety_1757095934.0209024_with_eval.json
+# python /opt/tiger/sft_entity/dllm-safety/LLaDA/evaluate_refusal.py /opt/tiger/sft_entity/LLaDA/result_LLaDA-8B-Instruct_safety_1757095934.0209024_with_eval.json

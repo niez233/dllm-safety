@@ -301,7 +301,7 @@ def generate_response(vanilla_prompt: str, prompt: str, tokenizer, model, args, 
         remask_ratio=args.remask_ratio,
         suppression_value=args.suppression_value,
         correct_only_first_block=args.correct_only_first_block,
-        fill_all_masks=(args.fill_all_masks or True),   # MMaDA 默认强制全序列就地填空
+        fill_all_masks=args.fill_all_masks,   # MMaDA 默认强制全序列就地填空
         debug_print=args.debug_print,
         baseline_hidden=baseline_hidden,
         attack_method=("pad" if args.attack_method.lower() == "pad" else "none"),

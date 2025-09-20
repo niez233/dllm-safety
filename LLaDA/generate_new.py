@@ -202,7 +202,7 @@ def main():
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
+        default="cuda:6" if torch.cuda.is_available() else "cpu",
         help="使用的设备。",
     )
     parser.add_argument(

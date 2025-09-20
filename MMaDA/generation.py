@@ -123,6 +123,7 @@ def generate(
     random_rate: float = 0.0,
     injection_step: Optional[int] = None,
     attention_mask: Optional[torch.Tensor] = None,  # (B, Lp)
+    alpha0: float = 0.3,
 ):
     device = prompt.device
     B, Lp = prompt.shape
@@ -181,21 +182,42 @@ def generate(
             logits_with_noise = add_gumbel_noise(logits, temperature=temperature)
             x0 = torch.argmax(logits_with_noise, dim=-1)  # (B, T)
 
-            # Confidence for remasking
-            if remasking == "low_confidence" or i != 0:
-                # 若显存紧，可将 float64 改为 float32
-                p = F.softmax(logits.to(torch.float64), dim=-1)
-                x0_p = torch.squeeze(torch.gather(p, dim=-1, index=x0.unsqueeze(-1)), -1)  # (B, T)
-            elif remasking == "random":
-                x0_p = torch.rand((B, T), device=device)
-            elif remasking == "rate":
-                p = F.softmax(logits.to(torch.float64), dim=-1)
-                model_conf = torch.squeeze(torch.gather(p, dim=-1, index=x0.unsqueeze(-1)), -1)
-                rand_conf = torch.rand((B, T), device=device)
-                x0_p = (1 - random_rate) * model_conf + random_rate * rand_conf
-            else:
-                raise NotImplementedError(f"remasking={remasking}")
+            # 统一计算 p 与 model_confidence，便于各模式复用
+            p = F.softmax(logits, dim=-1)
+            model_confidence = torch.squeeze(
+                torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1
+            )  # 形状 (B,L)，是当前预测 token 的置信度
+            R = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)  # 随机项 U(0,1)
 
+            # Adaptive Remask 两种策略 + 兼容原有三种
+            if remasking == "low_confidence":
+                # 纯置信度（等价于 α=0）
+                x0_p = model_confidence
+
+            elif remasking == "random":
+                # 纯随机（等价于 α=1）
+                x0_p = R
+
+            elif remasking == "rate":
+                # 保持你原来的 'rate' 模式：x0_p = (1-random_rate)*conf + random_rate*rand
+                x0_p = (1 - random_rate) * model_confidence + random_rate * R
+
+            elif remasking == "adaptive":
+                # 固定 α = alpha0： x0_p = (1-α)*conf + α*rand
+                alpha = torch.clamp(torch.tensor(alpha0, device=x0.device, dtype=model_confidence.dtype), 0.0, 1.0)
+                x0_p = (1 - alpha) * model_confidence + alpha * R
+
+            elif remasking == "adaptive_step":
+                # Step-aware 线性衰减： α_n = α_0 * (1 - (n-1)/(N-1))
+                if steps > 1:
+                    frac = 1.0 - (i / (steps - 1))  # i∈[0,steps-1], frac 从 1 线性到 0
+                else:
+                    frac = 1.0
+                alpha = torch.clamp(torch.tensor(alpha0 * frac, device=x0.device, dtype=model_confidence.dtype), 0.0, 1.0)
+                x0_p = (1 - alpha) * model_confidence + alpha * R
+
+            else:
+                raise NotImplementedError(remasking)
             # Do not select positions to the right of current block
             x0_p[:, Lp + (num_block + 1) * block_length:] = -np.inf
 
@@ -219,7 +241,7 @@ def main():
     parser = argparse.ArgumentParser(description="MMaDA masked generation (with attention_bias; aligned with LLaDA-style decoding).")
 
     parser.add_argument("--model_path", type=str, required=True, help="HF repo id or local path for MMaDA, e.g. Gen-Verse/MMaDA-8B-MixCoT")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--device", type=str, default="cuda:6" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--steps", type=int, default=64, help="Total sampling steps.")
     parser.add_argument("--gen_length", type=int, default=128, help="Generated answer length.")
     parser.add_argument("--block_length", type=int, default=128, help="Block length; must divide gen_length.")
@@ -231,6 +253,18 @@ def main():
     parser.add_argument("--random_rate", type=float, default=0.0, help="Only used when remasking='rate'.")
     parser.add_argument("--injection_step", type=int, default=None, help="Inject a token at the specified step (experimental).")
     parser.add_argument("--safety", action="store_true", help="Inject a safety system reminder into chat template.")
+    parser.add_argument("--remasking",
+        type=str,
+        default="low_confidence",
+        choices=["low_confidence", "random", "rate", "adaptive", "adaptive_step"],
+        help="重掩码策略：'low_confidence' | 'random' | 'rate' | 'adaptive' | 'adaptive_step'",
+    )
+    parser.add_argument(
+        "--alpha0",
+        type=float,
+        default=0.3,
+        help="Adaptive/Adaptive-step 的初始随机性权重 α0 (0~1)。",
+    )
 
     args = parser.parse_args()
     device = args.device
@@ -314,7 +348,8 @@ def main():
             block_length=args.block_length,
             temperature=args.temperature,
             cfg_scale=args.cfg_scale,
-            remasking="low_confidence",
+            remasking=args.remasking,   
+            alpha0=args.alpha0, 
             mask_id=mask_id,
             random_rate=args.random_rate,
             injection_step=args.injection_step,

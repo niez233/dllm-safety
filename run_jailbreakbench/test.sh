@@ -1,4 +1,5 @@
 # python /opt/tiger/sft_entity/dllm-safety/run_jailbreakbench/evaluation.py 
+# python /opt/tiger/sft_entity/dllm-safety/LLaDA/evaluation.py
 PY_TOP=$(python -c "import site; print(site.getusersitepackages())")
 PYTHONPATH="${PY_TOP}:${PYTHONPATH}" PYTHONNOUSERSITE=0 \
 python models/jailbreakbench_llada.py \
@@ -11,7 +12,7 @@ python models/jailbreakbench_llada.py \
   --debug_print
 # --defense_method self-reminder
 
-python models/jailbreakbench_llada.py \
+python models/jailbreakbench_llada.py \ 
   --model_path "/opt/tiger/sft_entity/DIJA/hf_models/LLaDA-8B-Instruct" \
   --attack_method PAD \
   --attack_prompt "/opt/tiger/sft_entity/dllm-safety/dija_advbench.json" \
@@ -32,11 +33,10 @@ python models/jailbreakbench_llada.py \
   --model_path "/opt/tiger/sft_entity/DIJA/hf_models/LLaDA-8B-Instruct" \
   --attack_method PAD \
   --attack_prompt "/opt/tiger/sft_entity/dllm-safety/dija_advbench.json" \
-  --output_json /opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_PAD_reminder_adaptive_step_hidden_8b.json \
+  --output_json /opt/tiger/sft_entity/DIJA/run_jailbreakbench/attack_results/out_PAD_adaptive_step_8b.json \
   --remasking adaptive_step \
-  --sp_mode hidden --sp_threshold 0.1 \
-  --defense_method self-reminder \
-  --refinement_steps 8 --remask_ratio 0.9 --debug_print --fill_all_masks
+  --sp_mode off \
+  --debug_print
 
 python models/jailbreakbench_llada.py \
   --model_path "/opt/tiger/sft_entity/DIJA/hf_models/LLaDA-8B-Instruct" \
@@ -203,9 +203,8 @@ python models/jailbreakbench_dream.py \
   --mask_counts 36 \
   --temperature 0.5 \
   --remasking adaptive_step \
-  --sp_mode hidden --sp_threshold 0.2 \
+  --sp_mode hidden --sp_threshold 0.1 \
   --refinement_steps 8 --remask_ratio 0.9 \
-  --pad_anchors "Step 1:" "Step 2:" "Step 3:" \
   --debug_print
 
 python models/jailbreakbench_dream.py \

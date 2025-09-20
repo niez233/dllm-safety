@@ -2,7 +2,7 @@
 # 适用于 diffusion_generate 的模型（例如 Dream 系列或同接口模型）
 # 自定义迭代生成（Adaptive Remask, 单 block）+ Self-Detection(hidden) + Self-Correction
 # Self-Detection/Correction 由 --sp_mode 控制；Adaptive Remask 由 --remasking 控制；两者独立
-# 当 --attack_method pad 时，统一走 generate_dream_llada_hidden（内部支持 PAD 注入 + 自检 + 自纠正，LLaDA 式逐步再填）
+# 当 --attack_method pad 时，统一走 generate_dream_hidden（内部支持 PAD 注入 + 自检 + 自纠正，逐步再填）
 
 import os
 import re
@@ -21,8 +21,8 @@ from typing import Optional, Iterable
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 from defense_utils import Defender
 
-# >>> 引入统一生成器（含 PAD 注入 + 自检 + 自纠正/LLaDA 式）<<<
-from utility.generate_function_dream import generate_dream_llada_hidden
+# >>> 引入统一生成器（含 PAD 注入 + 自检 + 自纠正）<<<
+from utility.generate_function_dream import generate_dream_hidden
 
 # ===== Defaults =====
 DEFAULT_GEN_LENGTH = 128
@@ -283,7 +283,7 @@ def apply_self_correction(
     debug_print: bool = False,
 ) -> torch.Tensor:
     """
-    LLaDA式自纠正：随机重掩 + 原token抑制 + 逐步再填（per-step top-k）。
+    自纠正：随机重掩 + 原token抑制 + 逐步再填（per-step top-k）。
     新增 exclude_mask_positions: True 的位置不会被选入候选集（用于 PAD 锚点保护）。
     """
     device = seq_ids.device
@@ -442,9 +442,9 @@ def generate_response(
 ) -> str:
     """
     解码路径：
-      - attack_method == "pad" -> 走 LLaDA 风格的 Dream hidden 自检 generate_dream_llada_hidden（off 时不纠正）
+      - attack_method == "pad" -> Dream hidden 自检 generate_dream_hidden（off 时不纠正）
       - remasking == "off"     -> 原生 diffusion_generate
-      - 其它                    -> 自定义 AR 解码（dream_adaptive_generate），必要时外层再做 LLaDA 式自纠正
+      - 其它                    -> 自定义 AR 解码（dream_adaptive_generate），必要时外层再做自纠正
     """
     # 编码
     input_ids, attention_mask = tokenized(model.device, tokenizer, prompt)
@@ -466,13 +466,43 @@ def generate_response(
         sum(a.item() == b.item() for a, b in zip(vanilla_ids[0], input_ids[0])),
         len(vanilla_ids[0]),
     )
+        # ====== 通用 LLaDA 对齐：仅当“输入里没有任何 <mask>”时，追加 gen_length 的 <|mask|> 尾巴 ======
+    # 用 token 层判断，确保和 --mask_id 对齐
+    has_any_mask = (input_ids == int(args.mask_id)).any().item()
+
+    if (not has_any_mask) and (int(args.gen_length) > 0):
+        B = input_ids.size(0)
+
+        # 1) 追加 <mask> 尾巴
+        tail = torch.full(
+            (B, int(args.gen_length)),
+            int(args.mask_id),
+            dtype=input_ids.dtype,
+            device=input_ids.device,
+        )
+        input_ids = torch.cat([input_ids, tail], dim=1)
+
+        # 2) 同步扩展 attention_mask（保持 dtype 一致）
+        tail_attn = torch.ones_like(tail, dtype=attention_mask.dtype, device=attention_mask.device)
+        attention_mask = torch.cat([attention_mask, tail_attn], dim=1)
+
+        # 3) 若上面构造了 protected_index（system 前缀保护），也 pad 到同长度
+        if "protected_index" in locals() and protected_index is not None:
+            need = input_ids.shape[1] - protected_index.shape[1]
+            if need > 0:
+                pad_false = torch.zeros(protected_index.size(0), need, dtype=torch.bool, device=protected_index.device)
+                protected_index = torch.cat([protected_index, pad_false], dim=1)
+
+        if getattr(args, "debug_print", False):
+            logging.info(f"[Dream-GenTail] appended {int(args.gen_length)} masks at token layer (generic, no-mask case).")
+
 
     attack_method_lower = (args.attack_method or "").lower()
 
     # ======= PAD 路径（统一） =======
     if attack_method_lower == "pad":
         if args.debug_print:
-            logging.info("[Dream-Path] PAD route via generate_dream_llada_hidden (unified)")
+            logging.info("[Dream-Path] PAD route via generate_dream_hidden (unified)")
         if args.sp_mode == "hidden":
             bl = baseline_hidden
             pr = attack_probe_hidden
@@ -482,7 +512,7 @@ def generate_response(
             pr = None
             thr = 1e9  # 不触发纠正
 
-        output_ids, sp_list = generate_dream_llada_hidden(
+        output_ids, sp_list = generate_dream_hidden(
             model=model,
             tokenizer=tokenizer,
             input_ids=input_ids,

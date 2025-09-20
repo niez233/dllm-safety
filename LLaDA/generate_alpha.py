@@ -137,14 +137,14 @@ def generate(
             logits_with_noise = add_gumbel_noise(logits, temperature=temperature)
             x0 = torch.argmax(logits_with_noise, dim=-1)  # b, l
 
-            # === NEW === 统一计算 p 与 model_confidence，便于各模式复用
+            # 统一计算 p 与 model_confidence，便于各模式复用
             p = F.softmax(logits, dim=-1)
             model_confidence = torch.squeeze(
                 torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1
             )  # 形状 (B,L)，是当前预测 token 的置信度
             R = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)  # 随机项 U(0,1)
 
-            # === NEW === Adaptive Remask 两种策略 + 兼容原有三种
+            # Adaptive Remask 两种策略 + 兼容原有三种
             if remasking == "low_confidence":
                 # 纯置信度（等价于 α=0）
                 x0_p = model_confidence
@@ -217,7 +217,7 @@ def main():
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
+        default="cuda:5" if torch.cuda.is_available() else "cpu",
         help="使用的设备。",
     )
     parser.add_argument(

@@ -138,6 +138,31 @@ def generate(
     x = prompt.clone().to(device)         # [B, L]
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
+    prompt_len = x.shape[1]
+    if int(gen_length) > 0:
+        tail_len = int(gen_length)
+        tail = torch.full((x.size(0), tail_len), mask_id, dtype=torch.long, device=device)
+        x = torch.cat([x, tail], dim=1)
+        if attention_mask is not None:
+            am_tail = torch.ones((attention_mask.size(0), tail_len),
+                                dtype=attention_mask.dtype, device=device)
+            attention_mask = torch.cat([attention_mask, am_tail], dim=1)
+        tail_start = prompt_len
+        tail_end = prompt_len + tail_len
+    else:
+        tail_start = tail_end = x.shape[1]
+    if (tail_end > tail_start) and (not fill_all_masks):
+        # LLaDA 语义：默认只在尾巴区间做自检/落子
+        block_start, block_end = tail_start, tail_end
+    else:
+        # 兼容：填满整个序列，或没有尾巴时，扩展到所有掩码的最小覆盖区间
+        block_start, block_end = 0, x.shape[1]
+        if (tail_end == tail_start):  # 无尾巴时尽量与 LLaDA 的“包含所有掩码”一致
+            mask_pos = (x == mask_id).nonzero(as_tuple=False)
+            if mask_pos.numel() > 0:
+                first = int(mask_pos[:, 1].min().item())
+                last  = int(mask_pos[:, 1].max().item()) + 1
+                block_start, block_end = first, last
 
     # 标记“非掩码”的初始提示位置（用于 CFG）
     prompt_index = (x != mask_id)
@@ -318,6 +343,9 @@ def generate(
         confidence = torch.where(mask_index, x0_p, torch.tensor(-float("inf"), device=x0.device))
         if protected_index is not None:
             confidence = confidence.masked_fill(protected_index, -float("inf"))
+        if not fill_all_masks:
+            confidence[:, :block_start] = -float("inf")
+            confidence[:, block_end:]   = -float("inf")
 
         transfer_index = torch.zeros_like(x, dtype=torch.bool, device=x.device)
         for b in range(confidence.shape[0]):
@@ -356,6 +384,7 @@ def generate(
 
     if debug_print:
         print(f"[MMaDA] Safety score={detection_score:.3f}, unsafe={unsafe_flag}", flush=True)
+        print(f"[MMaDA] block=({block_start}, {block_end}), tail=({tail_start}, {tail_end}), fill_all={fill_all_masks}", flush=True)
 
     if unsafe_flag:  # 仅一个“块”，correct_only_first_block 语义自然满足
         if debug_print:
